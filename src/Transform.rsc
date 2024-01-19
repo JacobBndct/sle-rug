@@ -3,6 +3,7 @@ module Transform
 import Syntax;
 import Resolve;
 import AST;
+import ParseTree;
 
 /* 
  * Transforming QL forms
@@ -29,7 +30,26 @@ import AST;
  */
  
 AForm flatten(AForm f) {
-  return f; 
+  return form(f.name, flattenQuestions(f.questions, boolean(true)));
+}
+
+list[AQuestion] flattenQuestions(list[AQuestion] questions, AExpr condition) {
+  list[AQuestion] result = [];
+  for (AQuestion q <- questions) {
+    switch(q) {
+      case AST::question(_, _, _): 
+        result += [ifThen(condition, q)];
+      case AST::computedQuestion(_, _, _, _): 
+        result += [ifThen(condition, q)];
+      case AST::block(_questions): 
+        result += flattenQuestions(_questions, condition);
+      case AST::ifThenElse(cond, passedCondition, failedCondition): 
+        result += flattenQuestions([passedCondition], AExpr::and(condition, cond)) + flattenQuestions([failedCondition], AExpr::and(condition, AExpr::not(cond)));
+      case AST::ifThen(cond, question): 
+        result += flattenQuestions([question], AExpr::and(condition, cond));
+    }
+  }
+  return result;
 }
 
 /* Rename refactoring:
@@ -39,10 +59,21 @@ AForm flatten(AForm f) {
  *
  */
  
-start[Form] rename(start[Form] f, loc useOrDef, str newName, UseDef useDef) {
-   return f; 
-} 
- 
- 
- 
-
+start[Form] rename(start[Form] f, loc location, str newVariableName, UseDef useDef) {   
+  set[loc] equivalentClass = { location };
+  bool isDefinition = location in useDef<1>;
+  if(isDefinition) {
+    equivalentClass += { u | <loc u, location> <- useDef };
+  } 
+  else {
+    if( <location, loc definition> <- useDef) {
+      equivalentClass += definition;
+      equivalentClass += { u | <loc u, definition> <- useDef };
+    }
+  }
+  updatedForm = visit(f) {
+    case Id x => [Id] newVariableName
+      when x.src in equivalentClass
+  }
+  return updatedForm; 
+}
